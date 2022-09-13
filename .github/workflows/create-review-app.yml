@@ -1,4 +1,4 @@
-name: Create Preview App123
+name: Create Preview App12334
 
 on:
   pull_request:
@@ -9,6 +9,7 @@ jobs:
   deploy:
     runs-on: ubuntu-latest
     steps:
+      - uses: actions/checkout@v2
       - name: Setup SSH
         run: |
           mkdir -p ~/.ssh
@@ -21,7 +22,50 @@ jobs:
           SSH_KNOWN_HOSTS: ${{ secrets.SSH_KNOWN_HOSTS }}
       - name: Copy files to the server
         run: |
-          scp -r . deploy@ec2-44-203-177-85.compute-1.amazonaws.com:~/app/${{ github.head_ref }}
+          rsync -a -r --progress --human-readable --delete \
+          --exclude public \
+          --exclude ecosystem.config.js \
+          . deploy@ec2-44-203-177-85.compute-1.amazonaws.com:~/app/${{ github.head_ref }}/
       - name: Restarting App
         run: |
-          ssh deploy@ec2-44-203-177-85.compute-1.amazonaws.com "cp ~/ecosystem.config.js ~/app/${{ github.head_ref }}/ && pushd ~/app/${{ github.head_ref }}  && npm install && pm2 restart ecosystem.config.js --name ${{ github.head_ref }} --env production --update-env && popd"
+          ssh deploy@ec2-44-203-177-85.compute-1.amazonaws.com "cp ~/ecosystem.config.js ~/app/${{ github.head_ref }}/ && pushd ~/app/${{ github.head_ref }}  && npm install && pm2 restart ecosystem.config.js --env production --update-env && popd"
+  review:
+    needs: deploy
+    runs-on: ubuntu-latest
+    steps:
+      - id: check-branch
+        uses: octokit/request-action@v2.x
+        with:
+          route: GET /repos/{owner}/{repo}/tree/{ref}
+          owner: pkutsenko
+          repo: react-redux-realworld-example-app
+          ref: ${{ github.head_ref }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.PAT_TOKEN }}
+        continue-on-error: true
+      - if: steps.check-branch.output.status == 200
+        name: Trigger frontend review app
+        uses: octokit/request-action@v2.x
+        with:
+          route: POST /repos/{owner}/{repo}/actions/workflows/publish-review-app.yml/dispatches
+          owner: pkutsenko
+          repo: react-redux-realworld-example-app
+          ref: ${{ github.head_ref }}
+          inputs: |
+            refName: ${{ github.head_ref }}
+            dst: ${{ github.head_ref }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.PAT_TOKEN }}
+      - if: steps.check-branch.output.status != 200
+        name: Trigger frontend review app
+        uses: octokit/request-action@v2.x
+        with:
+          route: POST /repos/{owner}/{repo}/actions/workflows/publish-review-app.yml/dispatches
+          owner: pkutsenko
+          repo: react-redux-realworld-example-app
+          ref: main
+          inputs: |
+            refName: "main"
+            dst: ${{ github.head_ref }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.PAT_TOKEN }}
